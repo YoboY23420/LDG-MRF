@@ -4,7 +4,7 @@ from datetime import datetime
 import torch.nn as nn
 from torch import optim
 from argparse import ArgumentParser
-from model10 import Model
+from model import Model
 
 def init_weights(m):
     if hasattr(m, 'weight') and m.weight is not None:
