@@ -61,14 +61,11 @@ class torch_Dataset_OASIS(data.Dataset):
 
 def torch_Dataloader_OASIS(img_dir, seg_dir, mode, batch_size, inshape, random_seed=None):
     Dataset_OASIS = torch_Dataset_OASIS(img_dir, seg_dir, mode, inshape)
-    # 这里shuffle设置成了false，因为网上说已经有batch_size了，就不需要shuffle来进行随机了，将shuffle设置为FALSE即可，
-    # 但是我看来网上有人又可以将其设置为True，但是是batch_size=4的时候
     if random_seed is None:
         loader = data.DataLoader(dataset=Dataset_OASIS, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False)
     else:
         g = torch.Generator()
         g.manual_seed(random_seed)
-        '''或者也可以这样写'''
         # torch.manual_seed(random_seed)
         # g = torch.Generator()
         loader = data.DataLoader(dataset=Dataset_OASIS, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False, generator=g)
@@ -198,14 +195,11 @@ class torch_Dataset_IXI(data.Dataset):
 
 def torch_Dataloader_IXI(tra_dir, val_dir, mode, batch_size, inshape, random_seed=None):
     Dataset_IXI = torch_Dataset_IXI(tra_dir, val_dir, mode, inshape)
-    # 这里shuffle设置成了false，因为网上说已经有batch_size了，就不需要shuffle来进行随机了，将shuffle设置为FALSE即可，
-    # 但是我看来网上有人又可以将其设置为True，但是是batch_size=4的时候
     if random_seed is None:
         loader = data.DataLoader(dataset=Dataset_IXI, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False)
     else:
         g = torch.Generator()
         g.manual_seed(random_seed)
-        '''或者也可以这样写'''
         # torch.manual_seed(random_seed)
         # g = torch.Generator()
         loader = data.DataLoader(dataset=Dataset_IXI, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False, generator=g)
@@ -303,20 +297,11 @@ def torch_Dataloader_Mind101(data_dir, mode, batch_size):
 """--------------------------------------------------------------------------Lung_CT Dataset--------------------------------------------------------------------------"""
 def sort_func(s):
     return [int(text) if text.isdigit() else text for text in re.split(r'(\d+)', s)]
-# def normalization(s):
-#     mean = s.mean()
-#     std = s.std()
-#     s_standardized = (s - mean) / std
-#     s_normalized = (s_standardized - s_standardized.min()) / (s_standardized.max() - s_standardized.min())
-#     # 如果你希望将其值放到一个范围内，例如 [0, 255]，可以将其乘以 255
-#     s_normalized_255 = (s_normalized * 255).astype(np.uint8)
-#     return s_normalized_255 / 255.0 # [0, 1]
 def normalization(s):
     mean = s.mean()
     std = s.std()
     s_standardized = (s - mean) / std
     s_normalized = (s_standardized - s_standardized.min()) / (s_standardized.max() - s_standardized.min())
-    # 如果你希望将其值放到一个范围内，例如 [0, 255]，可以将其乘以 255
     s_normalized_255 = (s_normalized * 255).astype(np.uint8)
     return s_normalized_255 / 255.0 # [0, 1]
 
@@ -382,14 +367,11 @@ class torch_Dataset_LungCT(data.Dataset):
 
 def torch_Dataloader_LungCT(img_dir, seg_dir, mode, batch_size, random_seed=None):
     Dataset_LungCT = torch_Dataset_LungCT(img_dir, seg_dir, mode)
-    # 这里shuffle设置成了false，因为网上说已经有batch_size了，就不需要shuffle来进行随机了，将shuffle设置为FALSE即可，
-    # 但是我看来网上有人又可以将其设置为True，但是是batch_size=4的时候
     if random_seed is None:
         loader = data.DataLoader(dataset=Dataset_LungCT, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False)
     else:
         g = torch.Generator()
         g.manual_seed(random_seed)
-        '''或者也可以这样写'''
         # torch.manual_seed(random_seed)
         # g = torch.Generator()
         loader = data.DataLoader(dataset=Dataset_LungCT, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False, generator=g)
