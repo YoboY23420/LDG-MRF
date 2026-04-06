@@ -241,13 +241,13 @@ class GCN_Global(nn.Module):
         super(GCN_Global, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.gcn_weight = nn.Parameter(torch.zeros(in_channels, out_channels), requires_grad=True)
+        self.gcn_weight = nn.Parameter(torch.zeros(in_channels*2, out_channels), requires_grad=True)
         nn.init.kaiming_uniform_(self.gcn_weight, a=math.sqrt(5))
         self.dropout = nn.Dropout(dropout_ratio)
         self.norm = nn.BatchNorm1d(out_channels)
     def forward(self, edge_weight, node_features):
         node_features = gmul_GCN(edge_weight, node_features)
-        node_features = node_features.contiguous().view(-1, self.in_channels)
+        node_features = node_features.contiguous().view(-1, self.in_channels*2)
         node_features = self.dropout(F.leaky_relu(torch.matmul(node_features, self.gcn_weight), 0.2))
         node_features = self.norm(node_features).unsqueeze(0)
         return node_features
@@ -257,14 +257,14 @@ class GCN_Cluster(nn.Module):
         super(GCN_Cluster, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.gcn_weight = nn.Parameter(torch.zeros(in_channels, out_channels), requires_grad=True)
+        self.gcn_weight = nn.Parameter(torch.zeros(in_channels*2, out_channels), requires_grad=True)
         nn.init.kaiming_uniform_(self.gcn_weight, a=math.sqrt(5))
         self.dropout = nn.Dropout(dropout_ratio)
         self.norm_1 = nn.BatchNorm1d(out_channels)
     def forward(self, edge_weight, node_features, spatial_weight):
         node_features = gmul_GCN(edge_weight, node_features)
-        weight = self.gcn_weight * spatial_weight
-        node_features = node_features.contiguous().view(-1, self.in_channels)
+        weight = torch.matmul(self.gcn_weight, spatial_weight)
+        node_features = node_features.contiguous().view(-1, self.in_channels*2)
         node_features = self.dropout(F.leaky_relu(torch.matmul(node_features, weight), 0.2))
         node_features = self.norm_1(node_features).unsqueeze(0)
         return node_features
@@ -274,14 +274,14 @@ class GCN_Local(nn.Module):
         super(GCN_Local, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.gcn_weight = nn.Parameter(torch.zeros(in_channels, out_channels), requires_grad=True)
+        self.gcn_weight = nn.Parameter(torch.zeros(in_channels*2, out_channels), requires_grad=True)
         nn.init.kaiming_uniform_(self.gcn_weight, a=math.sqrt(5))
         self.dropout = nn.Dropout(dropout_ratio)
         self.norm = nn.BatchNorm1d(out_channels)
     def forward(self, edge_weight, node_features):
         node_features = gmul_GCN(edge_weight, node_features)
         node_features_size = node_features.size()
-        node_features = node_features.contiguous().view(-1, self.in_channels)
+        node_features = node_features.contiguous().view(-1, self.in_channels*2)
         node_features = self.dropout(F.leaky_relu(torch.matmul(node_features, self.gcn_weight), 0.2))
         node_features = node_features.view(*node_features_size[:-1], self.out_channels)
         return node_features
@@ -327,7 +327,7 @@ class Proposed_Module_ClusterGNN(nn.Module):
         super(Proposed_Module_ClusterGNN, self).__init__()
         self.in_channels = in_channels
         self.window_size = window_size
-        self.adj = nn.ModuleList([Adjacent_matrix(in_channels, (2, 3), 0.2, 'none', True) for i in range(cluster_nums)])
+        self.adj = nn.ModuleList([Adjacent_matrix(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False) for i in range(cluster_nums)])
         self.get_weight = MLP(in_channels, in_channels*in_channels)
         self.GCN = nn.ModuleList([GCN_Cluster(in_channels, in_channels, 0.2) for i in range(cluster_nums)])
         self.cluster_nums = cluster_nums
@@ -372,7 +372,7 @@ class Proposed_Module_GlobalGNN(nn.Module):
     def __init__(self, in_channels: int, window_size: tuple):
         super(Proposed_Module_GlobalGNN, self).__init__()
         self.window_size = window_size
-        self.adj = Adjacent_matrix(in_channels, channel_ratios=(2, 3), dropout_ratio=0.2, weight_range='none', laplace=True)
+        self.adj = Adjacent_matrix(in_channels, channel_ratios=(2, 3), dropout_ratio=0.2, weight_range='softmax', laplace=False)
         self.GCN = GCN_Global(in_channels, in_channels, dropout_ratio=0.2)
     def forward(self, x_concat):
         x, grid_size, padding, original_size = window_partition(x_concat, self.window_size, mode='mlp')
@@ -415,7 +415,7 @@ class Proposed_Module_LocalGNN(nn.Module):
         self.conv_upsample = nn.Sequential(nn.ConvTranspose3d(in_channels, in_channels, window_size[0]//2, window_size[0]//2, 0),
                                            nn.BatchNorm3d(in_channels),
                                            nn.LeakyReLU(0.2))
-        self.adj = Adjacent_matrix_LocalGNN(in_channels, (2, 3), 0.2, 'none', True)
+        self.adj = Adjacent_matrix_LocalGNN(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False)
         self.GCN = GCN_Local(in_channels, in_channels, 0.2)
     def forward(self, x_concat):
         x_concat = self.conv_change_channels(x_concat)
