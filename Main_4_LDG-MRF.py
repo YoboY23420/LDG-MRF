@@ -12,7 +12,7 @@ def init_weights(m):
     if hasattr(m, 'bias') and m.bias is not None:
         nn.init.constant_(m.bias, 0)
 
-def main(device, dataset, channel_num, cluster_num):
+def main(device, dataset, channel_num, cluster_num, gcn_layer):
     os.environ['CUDA_VISIBLE_DEVICES'] = device
     if dataset == 'OASIS':
         train_dir = '/Medical_Image_Registration/3D_brain_MRI/affine_img/'
@@ -63,7 +63,7 @@ def main(device, dataset, channel_num, cluster_num):
         os.makedirs(os.path.join(save_exp))
         os.makedirs(os.path.join(save_exp, timestamp))
 
-    model = Model(channel_num, cluster_num)
+    model = Model(channel_num, cluster_num, gcn_layer)
     # model.apply(init_weights)
     model.cuda()
     reg_model = utils.register_model(img_size, 'nearest')
@@ -159,5 +159,6 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, default='OASIS')
     parser.add_argument('--channel_num', type=int, default=1)
     parser.add_argument('--cluster_num', type=int, default=1)
+    parser.add_argument('--gcn_layer', type=int, default=1)
     args = parser.parse_args()
     main(**vars(args))
