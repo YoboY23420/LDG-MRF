@@ -323,13 +323,16 @@ def scatter_restore(cluster_index, cluster_outputs, N, C):
     return restored.view(1, N, C)
 
 class Proposed_Module_ClusterGNN(nn.Module):
-    def __init__(self, in_channels: int, window_size: tuple, cluster_nums: int):
+    def __init__(self, in_channels: int, window_size: tuple, cluster_nums: int, GCN_layer: int):
         super(Proposed_Module_ClusterGNN, self).__init__()
         self.in_channels = in_channels
         self.window_size = window_size
-        self.adj = nn.ModuleList([Adjacent_matrix(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False) for i in range(cluster_nums)])
-        self.get_weight = MLP(in_channels, in_channels*in_channels)
-        self.GCN = nn.ModuleList([GCN_Cluster(in_channels, in_channels, 0.2) for i in range(cluster_nums)])
+        self.GCN_layer = GCN_layer
+        self.get_weight = MLP(in_channels, in_channels * in_channels)
+        # self.adj = nn.ModuleList([Adjacent_matrix(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False) for i in range(cluster_nums)])
+        # self.GCN = nn.ModuleList([GCN_Cluster(in_channels, in_channels, 0.2) for i in range(cluster_nums)])
+        self.adj = nn.ModuleList([nn.ModuleList([Adjacent_matrix(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False) for i in range(GCN_layer)]) for j in range(cluster_nums)])
+        self.GCN = nn.ModuleList([nn.ModuleList([GCN_Cluster(in_channels, in_channels, 0.2) for j in range(GCN_layer)]) for i in range(cluster_nums)])
         self.cluster_nums = cluster_nums
         self.kmeans = KMeans_Get_Cluster_Index_and_Centroids(cluster_nums=cluster_nums)
     def forward(self, x_concat):
@@ -343,11 +346,15 @@ class Proposed_Module_ClusterGNN(nn.Module):
                 cluster_outputs.append(cluster)
             else:
                 adj_diag = Variable(torch.eye(cluster.shape[1]).unsqueeze(0).repeat(1, 1, 1).unsqueeze(3)).cuda()
-                adj_new = self.adj[i](cluster, adj_diag)
                 spatial_weight = self.get_weight(cluster_centroids[:, i, :])
                 spatial_weight = spatial_weight.contiguous().view(self.in_channels, self.in_channels)
-                cluster_new = self.GCN[i](adj_new, cluster, spatial_weight)
-                cluster_outputs.append(cluster_new)
+                # adj_new = self.adj[i](cluster, adj_diag)
+                # cluster_new = self.GCN[i](adj_new, cluster, spatial_weight)
+                for j in range(self.GCN_layer):
+                    adj_new = self.adj[i][j](cluster, adj_diag)
+                    cluster = self.GCN[i][j](adj_new, cluster, spatial_weight)
+                cluster_outputs.append(cluster)
+                # cluster_outputs.append(cluster_new)
         x_new = scatter_restore(cluster_index, cluster_outputs, N=x.size(1), C=self.in_channels)
         x_new = einops.rearrange(x_new, 'b (gh gw gd) c -> b c gh gw gd', gh=grid_size[0], gw=grid_size[1], gd=grid_size[2])
         if self.window_size[0] == 2:
@@ -369,18 +376,25 @@ class Proposed_Module_ClusterGNN(nn.Module):
         return out
 
 class Proposed_Module_GlobalGNN(nn.Module):
-    def __init__(self, in_channels: int, window_size: tuple):
+    def __init__(self, in_channels: int, window_size: tuple, GCN_layer: int):
         super(Proposed_Module_GlobalGNN, self).__init__()
         self.window_size = window_size
-        self.adj = Adjacent_matrix(in_channels, channel_ratios=(2, 3), dropout_ratio=0.2, weight_range='softmax', laplace=False)
-        self.GCN = GCN_Global(in_channels, in_channels, dropout_ratio=0.2)
+        # self.adj = Adjacent_matrix(in_channels, channel_ratios=(2, 3), dropout_ratio=0.2, weight_range='softmax', laplace=False)
+        # self.GCN = GCN_Global(in_channels, in_channels, dropout_ratio=0.2)
+        self.GCN_layer = GCN_layer
+        self.adj = nn.ModuleList([Adjacent_matrix(in_channels, channel_ratios=(2, 3), dropout_ratio=0.2, weight_range='softmax', laplace=False) for i in range(GCN_layer)])
+        self.GCN = nn.ModuleList([GCN_Global(in_channels, in_channels, dropout_ratio=0.2) for i in range(GCN_layer)])
     def forward(self, x_concat):
         x, grid_size, padding, original_size = window_partition(x_concat, self.window_size, mode='mlp')
         x = einops.reduce(x, 'b gh gw gd fh fw fd c -> b (gh gw gd) c', 'mean')
         adj_diag = Variable(torch.eye(x.shape[1]).unsqueeze(0).repeat(1, 1, 1).unsqueeze(3)).cuda()
-        adj_new = self.adj(x, adj_diag)
-        x_new = self.GCN(adj_new, x)
-        x_new = einops.rearrange(x_new, 'b (gh gw gd) c -> b c gh gw gd', gh=grid_size[0], gw=grid_size[1], gd=grid_size[2])
+        # adj_new = self.adj(x, adj_diag)
+        # # x_new = self.GCN(adj_new, x)
+        # x_new = einops.rearrange(x_new, 'b (gh gw gd) c -> b c gh gw gd', gh=grid_size[0], gw=grid_size[1], gd=grid_size[2])
+        for i in range(self.GCN_layer):
+            adj_new = self.adj[i](x, adj_diag)
+            x = self.GCN[i](adj_new, x)
+        x_new = einops.rearrange(x, 'b (gh gw gd) c -> b c gh gw gd', gh=grid_size[0], gw=grid_size[1], gd=grid_size[2])
         if self.window_size[0] == 2:
             x_new_pad = F.pad(x_new, (0, 1, 0, 1, 0, 1))
             x_unfold = x_new_pad.unfold(2, 2, 1).unfold(3, 2, 1).unfold(4, 2, 1)
@@ -400,7 +414,7 @@ class Proposed_Module_GlobalGNN(nn.Module):
         return out
 
 class Proposed_Module_LocalGNN(nn.Module):
-    def __init__(self, in_channels: int, window_size: tuple):
+    def __init__(self, in_channels: int, window_size: tuple, GCN_layer: int):
         super(Proposed_Module_LocalGNN, self).__init__()
         self.window_size = window_size
         self.conv_change_channels = nn.Sequential(nn.Conv3d(in_channels, in_channels*2, 3, 1, 1),
@@ -415,17 +429,24 @@ class Proposed_Module_LocalGNN(nn.Module):
         self.conv_upsample = nn.Sequential(nn.ConvTranspose3d(in_channels, in_channels, window_size[0]//2, window_size[0]//2, 0),
                                            nn.BatchNorm3d(in_channels),
                                            nn.LeakyReLU(0.2))
-        self.adj = Adjacent_matrix_LocalGNN(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False)
-        self.GCN = GCN_Local(in_channels, in_channels, 0.2)
+        # self.adj = Adjacent_matrix_LocalGNN(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False)
+        # self.GCN = GCN_Local(in_channels, in_channels, 0.2)
+        self.GCN_layer = GCN_layer
+        self.adj = nn.ModuleList([Adjacent_matrix_LocalGNN(in_channels, (2, 3), 0.2, weight_range='softmax', laplace=False) for i in range(GCN_layer)])
+        self.GCN = nn.ModuleList([GCN_Local(in_channels, in_channels, dropout_ratio=0.2) for i in range(GCN_layer)])
     def forward(self, x_concat):
         x_concat = self.conv_change_channels(x_concat)
         x, grid_size, padding, original_size = window_partition(x_concat.permute(0, 2, 3, 4, 1), self.window_size, mode='conv')
         x = self.conv_downsample(x)
         x = einops.rearrange(x, 'b c d h w -> b (d h w) c')
         adj_diag = Variable(torch.eye(x.size(1)).unsqueeze(0).repeat(x.size(0), 1, 1).unsqueeze(3)).cuda()
-        adj_new = self.adj(x, adj_diag)
-        x_new = self.GCN(adj_new, x)
-        x_new = einops.rearrange(x_new, 'b (d h w) c -> b c d h w', d=2, h=2, w=2)
+        # adj_new = self.adj(x, adj_diag)
+        # x_new = self.GCN(adj_new, x)
+        # x_new = einops.rearrange(x_new, 'b (d h w) c -> b c d h w', d=2, h=2, w=2)
+        for i in range(self.GCN_layer):
+            adj_new = self.adj[i](x, adj_diag)
+            x = self.GCN[i](adj_new, x)
+        x_new = einops.rearrange(x, 'b (d h w) c -> b c d h w', d=2, h=2, w=2)
         x_new = self.conv_upsample(x_new)
         x_new = reversed_window_partition(x_new, grid_size, padding, original_size, self.window_size, 'conv')
         return x_new
@@ -445,14 +466,14 @@ class context_attention(nn.Module):
         return sum
 
 class Proposed_Module(nn.Module):
-    def __init__(self, in_channels: int, window_size: tuple, cluster_nums: int):
+    def __init__(self, in_channels: int, window_size: tuple, cluster_nums: int, GCN_layer: int):
         super(Proposed_Module, self).__init__()
         self.conv_block = nn.Sequential(nn.Conv3d(in_channels*2+27, in_channels, kernel_size=3, stride=1, padding=1),
                                   nn.LeakyReLU(0.2),
                                   nn.InstanceNorm3d(in_channels))
-        self.module_1 = Proposed_Module_GlobalGNN(in_channels=in_channels, window_size=window_size)
-        self.module_2 = Proposed_Module_ClusterGNN(in_channels=in_channels, window_size=window_size, cluster_nums=cluster_nums)
-        self.module_3 = Proposed_Module_LocalGNN(in_channels=in_channels, window_size=window_size)
+        self.module_1 = Proposed_Module_GlobalGNN(in_channels=in_channels, window_size=window_size, GCN_layer=GCN_layer)
+        self.module_2 = Proposed_Module_ClusterGNN(in_channels=in_channels, window_size=window_size, cluster_nums=cluster_nums, GCN_layer=GCN_layer)
+        self.module_3 = Proposed_Module_LocalGNN(in_channels=in_channels, window_size=window_size, GCN_layer=GCN_layer)
         self.context_attention_1 = context_attention(in_channels=in_channels)
         self.context_attention_2 = context_attention(in_channels=in_channels)
     def forward(self, x_1, x_2):
@@ -491,14 +512,14 @@ class Flow_Estimator(nn.Module):
         return x
 
 class Model(nn.Module):
-    def __init__(self, channel_num: int, cluster_num: int):
+    def __init__(self, channel_num: int, cluster_num: int, GCN_layer: int):
         super(Model, self).__init__()
         self.encoder = Encoder(in_channels=1, channel_num=channel_num)
 
-        self.proposed_module_2 = Proposed_Module(in_channels=channel_num, window_size=(16, 16, 16), cluster_nums=cluster_num)
-        self.proposed_module_3 = Proposed_Module(in_channels=channel_num*2, window_size=(8, 8, 8), cluster_nums=cluster_num)
-        self.proposed_module_4 = Proposed_Module(in_channels=channel_num*4, window_size=(4, 4, 4), cluster_nums=cluster_num)
-        self.proposed_module_5 = Proposed_Module(in_channels=channel_num*8, window_size=(2, 2, 2), cluster_nums=cluster_num)
+        self.proposed_module_2 = Proposed_Module(in_channels=channel_num, window_size=(16, 16, 16), cluster_nums=cluster_num, GCN_layer=GCN_layer)
+        self.proposed_module_3 = Proposed_Module(in_channels=channel_num*2, window_size=(8, 8, 8), cluster_nums=cluster_num, GCN_layer=GCN_layer)
+        self.proposed_module_4 = Proposed_Module(in_channels=channel_num*4, window_size=(4, 4, 4), cluster_nums=cluster_num, GCN_layer=GCN_layer)
+        self.proposed_module_5 = Proposed_Module(in_channels=channel_num*8, window_size=(2, 2, 2), cluster_nums=cluster_num, GCN_layer=GCN_layer)
 
         self.reghead_5 = Flow_Estimator(in_channels=channel_num*8, if_corr=False)
         self.reghead_4 = Flow_Estimator(in_channels=channel_num*4, if_corr=False)
